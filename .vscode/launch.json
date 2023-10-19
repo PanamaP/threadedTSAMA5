@@ -1,0 +1,24 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "C/C++ Runner: Debug Session",
+      "type": "cppdbg",
+      "request": "launch",
+      "args": ["4003"],
+      "stopAtEntry": false,
+      "externalConsole": false,
+      "cwd": "/home/elfarsa/Insync/elfarsnaer@gmail.com/Google Drive/Haust2023/TSAM/Assignments/Assignment 5 The Botnet Saves the World/example/test/NEWBUILD",
+      "program": "/home/elfarsa/Insync/elfarsnaer@gmail.com/Google Drive/Haust2023/TSAM/Assignments/Assignment 5 The Botnet Saves the World/example/test/NEWBUILD/build/Debug/outDebug",
+      "MIMode": "gdb",
+      "miDebuggerPath": "gdb",
+      "setupCommands": [
+        {
+          "description": "Enable pretty-printing for gdb",
+          "text": "-enable-pretty-printing",
+          "ignoreFailures": true
+        }
+      ]
+    }
+  ]
+}
