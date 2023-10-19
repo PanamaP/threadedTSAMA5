@@ -190,10 +190,8 @@ public:
                     serverList += server_connections[i].groupID + "," + server_connections[i].ip + "," + std::to_string(server_connections[i].port) + ";";
                     std::cout << "Server: " << server_connections[i].ip << "," << server_connections[i].port << ";" << std::endl;
                 }
-                serverList = STX + serverList + ETX;
                 std::cout << "Sending server list: " << serverList << std::endl;
                 sendMessageToServer(connection, serverList);
-                //send(connection.socket, serverList.c_str(), serverList.length(), 0);
             }
             else if (message.find("SERVERS,") != std::string::npos)
             {
