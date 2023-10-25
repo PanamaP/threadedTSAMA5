@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include <vector>
+#include <map>
 #include <thread>
 #include <mutex>
 
@@ -51,9 +52,12 @@ private:
 
     std::vector<Connection> server_connections;
     std::vector<Connection> client_connections;
+    std::map<int, int> messages_waiting_receive; // sockfd -> number of messages waiting
+    std::map<int, int> messages_waiting_sending;
 
     std::mutex server_connections_mutex;
     std::mutex client_connections_mutex;
+    std::mutex messages_waiting_mutex;
 
 public:
     Server(int port) : port(port) {}
@@ -89,7 +93,6 @@ public:
         sk_addr.sin_family = AF_INET;
         sk_addr.sin_addr.s_addr = INADDR_ANY;
         sk_addr.sin_port = htons(port);
-        socklen_t addr_len = sizeof(sk_addr);
 
         // Bind to socket to listen for connections
         if (bind(sock, (struct sockaddr *)&sk_addr, sizeof(sk_addr)) < 0)
@@ -140,6 +143,8 @@ public:
             server_connections.push_back(newConnection);
             server_connections_mutex.unlock();
 
+            sendHandshakeMesage(newConnection);
+
             // New thread to handle messages from this server
             std::thread handleServerMessagesThread(&Server::handleServerMessages, this, newConnection);
             handleServerMessagesThread.detach(); // Detach so main doesnt wait for it
@@ -168,8 +173,6 @@ public:
 
             //nread = recv(connection.socket, buffer, sizeof(buffer), 0);
             nread = read(connection.socket, buffer, sizeof(buffer));
-            std::cout << "Message received from server " << connection.groupID << " buffer: " << buffer << std::endl;
-            std::cout << "Message received from server nread: " << nread << std::endl;
 
             if(nread <= 0){
                 // Connection closed
@@ -185,7 +188,7 @@ public:
             {
                 // Send list of servers to server
                 std::string serverList = "SERVERS,P3_GROUP_37," + ip + "," + std::to_string(port) + ";";
-                for (int i = 0; i < server_connections.size(); i++)
+                for (size_t i = 0; i < server_connections.size(); i++)
                 {
                     serverList += server_connections[i].groupID + "," + server_connections[i].ip + "," + std::to_string(server_connections[i].port) + ";";
                     std::cout << "Server: " << server_connections[i].ip << "," << server_connections[i].port << ";" << std::endl;
@@ -193,7 +196,7 @@ public:
                 std::cout << "Sending server list: " << serverList << std::endl;
                 sendMessageToServer(connection, serverList);
             }
-            else if (message.find("SERVERS,") != std::string::npos)
+            else if (message.find("SERVERS,") != std::string::npos) // TODO: This currently only prints the server list
             {
                 // Add servers to server_connections
                 std::string serverList = message;
@@ -206,6 +209,17 @@ public:
                     std::cout << token << std::endl;
                     serverList.erase(0, pos + delimiter.length());
                 }
+            }
+            else if (message.find("KEEPALIVE,") != std::string::npos)
+            {
+                std::string numberOfMessageStr = message.substr(message.find(",") + 1);
+                int numberOfMessages = std::stoi(numberOfMessageStr);
+                std::cout << "Received KEEPALIVE from server with number of messages: " << numberOfMessages << std::endl;
+                incrementMessagesWaiting(messages_waiting_receive, connection.socket, numberOfMessages);
+            }
+            else if (message.find("FETCH MSGS,") != std::string::npos)
+            {
+
             }
         }
     }
@@ -253,13 +267,30 @@ public:
         std::cout << "IP: " << targetIP << " Port: " << targetPort << std::endl;
         std::cout << "Checking on messages from server" << std::endl;
         
-        // Send first message to server
-        sendMessageToServer(newConnection, "QUERYSERVERS,P3_GROUP_37");
-        std::cout << "Sent message to server" << std::endl;
-        
+        sendHandshakeMesage(newConnection);
+
         // New thread to handle messages from this server
         std::thread handleConnectMessagesThread(&Server::handleServerMessages, this, newConnection);
         handleConnectMessagesThread.detach(); // Detach so main doesnt wait for it
+    }
+
+    // Send handshake message to server
+    void sendHandshakeMesage(const Connection& serverConnection)
+    {
+        sendMessageToServer(serverConnection, "QUERYSERVERS,P3_GROUP_37");
+        std::cout << "Sent handshake message to server, "  << std::endl;
+    }
+
+    // Send keep alive message to connection
+    void sendKeepAlive(const Connection& connection)
+    {
+        messages_waiting_mutex.lock();
+        // If connection socket doesn't exist it will create it with value 0
+        int count = messages_waiting_sending[connection.socket]; 
+        messages_waiting_mutex.unlock();
+
+        sendMessageToServer(connection, "KEEPALIVE," + std::to_string(count));
+        std::cout << "Sent KEEPALIVE to server with number of messages: " << count << std::endl;
     }
 
     // Send message to server with STX and ETX
@@ -309,6 +340,35 @@ public:
         this->ip = ip;
     }
 
+    // Increment the number of messages waiting for a socket
+    void incrementMessagesWaiting(std::map<int, int> messages_waiting, const int socket, const int numberOfMessages)
+    {
+        messages_waiting_mutex.lock();
+        messages_waiting[socket] += numberOfMessages;
+        messages_waiting_mutex.unlock();
+    }
+
+    // Set the number of messages waiting for a socket to a number
+    void setMessagesWaiting(std::map<int, int> messages_waiting, const int socket, const int numberOfMessages)
+    {
+        messages_waiting_mutex.lock();
+        messages_waiting[socket] = numberOfMessages;
+        messages_waiting_mutex.unlock();
+    }
+
+    // Send keep alive message every minute to all connected servers
+    void keepAliveTracker()
+    {
+        while(true)
+        {
+            std::this_thread::sleep_for(std::chrono::minutes(1));
+            for(const auto& connection : server_connections)
+            {
+                sendKeepAlive(connection);
+            }
+        }
+    }
+
 };
 
 int main(int argc, char *argv[])
@@ -333,6 +393,10 @@ int main(int argc, char *argv[])
     // Threads for accepting connections
     std::thread accept_server_thread(&Server::acceptServerConnection, &server);
     std::thread accept_client_thread(&Server::acceptClientConnection, &server);
+
+    // Thread to send keep alive messages every minute to all connected servers
+    std::thread keep_alive_thread(&Server::keepAliveTracker, &server);
+    keep_alive_thread.detach();
 
     // Connect to instructor server to start
     server.connectToServer("130.208.243.61", 4001, "Instr_1");
