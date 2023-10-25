@@ -171,8 +171,6 @@ public:
                 server_connections.push_back(newConnection);
                 server_connections_mutex.unlock();
 
-                sendHandshakeMesage(newConnection);
-
                 // New thread to handle messages from this server
                 std::thread handleServerMessagesThread(&Server::handleServerMessages, this, newConnection);
                 handleServerMessagesThread.detach(); // Detach so main doesnt wait for it
@@ -201,7 +199,6 @@ public:
                 sendMessageToClient(Connection(newsock, "", 0, ""), "ERROR: Did not receive handshake");
                 std::cout << "Did not receive handshake from connection" << std::endl;
                 close(newsock);
-                break;
             }
         }
     }
@@ -457,6 +454,7 @@ public:
         }
         std::cout << "Sending server list: " << serverList << std::endl;
         sendMessageToServer(connection, serverList);
+        sendHandshakeMesage(connection);
     }
 
     // Process the received SEND_MSG command
@@ -606,8 +604,8 @@ int main(int argc, char *argv[])
     keep_alive_thread.detach();
 
     // Connect to instructor server to start
-    server.connectToServer("130.208.243.61", 4001, "Instr_1");
-    //server.connectToServer("130.208.243.61", 4003, "Instr_3");
+    //server.connectToServer("130.208.243.61", 4001, "Instr_1");
+    server.connectToServer("130.208.243.61", 4003, "Instr_3");
 
     accept_connection_thread.join();
 
