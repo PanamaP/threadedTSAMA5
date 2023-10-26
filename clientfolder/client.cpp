@@ -56,7 +56,8 @@ void listenServer(int serverSocket)
        }
        else if(nread > 0)
        {
-            std::cout << getTimestamp() << "]" << " Received: " << buffer;
+            std::cout << getTimestamp() << "]" << " Received: " << buffer << std::endl;
+            break;
        }
        printf("\n");
     }
@@ -133,15 +134,66 @@ int main(int argc, char* argv[])
     send(serverSocket, handshake_msg, strlen(handshake_msg), 0);
 
     // Listen and print replies from server
-    std::thread serverThread(listenServer, serverSocket);
+    //std::thread serverThread(listenServer, serverSocket);
 
     finished = false;
     while(!finished)
     {
-        bzero(buffer, sizeof(buffer));
+        std::cout << "Menu:" << std::endl;
+        std::cout << "1. List all connected servers" << std::endl;
+        std::cout << "2. Get message for group" << std::endl;
+        std::cout << "3. Get all messages for group" << std::endl;
+        std::cout << "4. Send message to group" << std::endl;
+        std::cout << "5. Get statusreq for group" << std::endl;
+        std::cout << "6. Exit \n";
 
-        fgets(buffer, sizeof(buffer), stdin);
-        std::cout << getTimestamp() << "]" << " Sent: " << buffer;
+        int choice;
+        std::cin >> choice;
+        std::cin.ignore();
+
+        std::string groupID;
+        std::string message;
+        std::string cmd;
+
+        switch(choice){
+            case 1:
+                cmd = "LISTSERVERS";
+                break;
+            case 2:
+                std::cout << "Enter group id:";
+                std::cin >> groupID;
+                cmd = "GETMSG," + groupID;
+                break;
+            case 3:
+                std::cout << "Enter group id:";
+                std::cin >> groupID;
+                cmd = "GETALLMSG," + groupID;
+                break;
+            case 4:
+                std::cout << "Enter group id:";
+                std::cin >> groupID;
+                std::cin.ignore();  // Clear the newline from previous input
+                std::cout << "Enter your message: ";
+                std::getline(std::cin, message);
+                cmd = "SENDMSG," + groupID + "," + message;
+                break;
+            case 5:
+                std::cout << "Enter group id:";
+                std::cin >> groupID;
+                cmd = "STATUSREQ," + groupID;
+                break;
+            case 6:
+                std::cout << "Exiting.." << std::endl;
+                finished = true;
+                exit(0);
+            default:
+                std::cout << "Please enter a number between 1-5." << std::endl;
+                continue;
+        }
+
+
+        bzero(buffer, sizeof(buffer));
+        strncpy(buffer, cmd.c_str(), sizeof(buffer) - 1);
         nwrite = send(serverSocket, buffer, strlen(buffer) + 1,0);
 
         if(nwrite  == -1)
@@ -149,6 +201,10 @@ int main(int argc, char* argv[])
             perror("send() to server failed: ");
             finished = true;
         }
-
+        else
+        {
+            std::cout << getTimestamp() << "]" << " Sent: " << buffer << std::endl;
+        }
+        listenServer(serverSocket);
    }
 }
