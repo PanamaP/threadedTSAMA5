@@ -57,7 +57,6 @@ void listenServer(int serverSocket)
        else if(nread > 0)
        {
             std::cout << getTimestamp() << "]" << " Received: " << buffer << std::endl;
-            break;
        }
        printf("\n");
     }
@@ -70,7 +69,7 @@ int main(int argc, char* argv[])
    struct sockaddr_in serv_addr;           // Socket address for server
    int serverSocket;                         // Socket used for server 
    int nwrite;                               // No. bytes written to server
-   char buffer[1025];                        // buffer for writing to server
+   char buffer[5000];                        // buffer for writing to server
    bool finished;                   
    int set = 1;                              // Toggle for setsockopt
 
@@ -134,7 +133,7 @@ int main(int argc, char* argv[])
     send(serverSocket, handshake_msg, strlen(handshake_msg), 0);
 
     // Listen and print replies from server
-    //std::thread serverThread(listenServer, serverSocket);
+    std::thread serverThread(listenServer, serverSocket);
 
     finished = false;
     while(!finished)
@@ -201,10 +200,7 @@ int main(int argc, char* argv[])
             perror("send() to server failed: ");
             finished = true;
         }
-        else
-        {
-            std::cout << getTimestamp() << "]" << " Sent: " << buffer << std::endl;
-        }
-        listenServer(serverSocket);
+        std::cout << getTimestamp() << "]" << " Sent: " << cmd << std::endl;
+        
    }
 }

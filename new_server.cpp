@@ -154,7 +154,6 @@ public:
                 continue;
             }
 
-            std::cout << "Checking handshake from connection" << std::endl;
             nread = recv(newsock, buffer, sizeof(buffer), 0);
             std::string message(buffer, nread);
 
@@ -162,7 +161,7 @@ public:
             {
                 std::string connectingIP = inet_ntoa(sk_addr.sin_addr);
                 int connectingPort = ntohs(sk_addr.sin_port);
-                std::string groupID = message.substr(message.find(",") + 1);
+                std::string groupID = cleanString(message.substr(message.find(",") + 1));
                 Connection newConnection(newsock, connectingIP, connectingPort, groupID);
                 std::cout << "New server connection accepted" << "IP: " << connectingIP << " Port: " << connectingPort << std::endl;
 
@@ -194,7 +193,7 @@ public:
             else
             {
                 // Didn't receive a handshake
-                sendMessageToClient(Connection(newsock, "", 0, ""), "ERROR: Did not receive handshake");
+                sendMessageToServer(Connection(newsock, "", 0, ""), "ERROR: Did not receive handshake");
                 std::cout << "Did not receive handshake from connection" << std::endl;
                 close(newsock);
             }
@@ -207,8 +206,6 @@ public:
         const int BUFFER_SIZE = 5000;
         char buffer[BUFFER_SIZE];
         int nread;
-
-        std::cout << "Handling server messages" << std::endl;
 
         while(true)
         {
@@ -235,7 +232,7 @@ public:
             }
 
             std::string message(buffer);
-            std::cout << "Received message from server: " << connection.groupID << " Message: " << message << std::endl;
+            
             if (message.find("QUERYSERVERS,") != std::string::npos)
             {
                 // Send list of servers to server
@@ -245,14 +242,11 @@ public:
             {
                 // Add servers to server_connections
                 std::string serverList = message;
-                std::cout << "Server list: " << std::endl;
                 std::string delimiter = ";";
                 size_t pos = 0;
                 std::string token;
                 while ((pos = serverList.find(delimiter)) != std::string::npos) {
-                    token = serverList.substr(0, pos);
-                    std::cout << token << std::endl;
-                    
+                    token = serverList.substr(0, pos);                    
                     // This response is the server responding
                     if(token.find("SERVERS,") != std::string::npos)
                     {
@@ -274,7 +268,14 @@ public:
                                 Connection editConnection = server_connections[i];
                                 editConnection.groupID = groupID;
                                 editConnection.ip = ip;
-                                editConnection.port = std::stoi(port);
+                                
+                                try {
+                                    int newPort = std::stoi(port);
+                                    editConnection.port = newPort;
+                                } catch (const std::invalid_argument& ia) {
+                                    std::cerr << "Invalid port: " << ia.what() << std::endl;
+                                    break;
+                                }
                                 server_connections[i] = editConnection;
                                 break;
                             }
@@ -282,7 +283,7 @@ public:
                         server_connections_mutex.unlock();
                     }
                     else if(token.find("P3_GROUP_") != std::string::npos || token.find("Instr_") != std::string::npos)
-                    {
+                    {                        
                         std::string groupID = token.substr(0, token.find(","));
                         std::string port = token.substr(token.find(",") + 1);
 
@@ -294,60 +295,84 @@ public:
 
                         if(groupID != this->groupID && port != "-1" && server_connections.size() < MAX_CONNECTED_SERVERS)
                         {
+                            server_connections_mutex.lock();
                             bool connected = false;
                             for (size_t i = 0; i < server_connections.size(); ++i) {
-                                if (server_connections[i].groupID == groupID && server_connections[i].port == std::stoi(port) && server_connections[i].ip == ip) {
+                                if (server_connections[i].groupID == groupID && server_connections[i].ip == ip) {
                                     connected = true;
                                     break;
                                 }
                             }
                             if(!connected)
+                            {   
+                                server_connections_mutex.unlock();
+                                std::cout << "Trying to connect to new server: " << groupID << " IP: " << ip << " Port: " << port << std::endl;
+                                try {
+                                    int newPort = std::stoi(port);
+                                    connectToServer(ip, newPort, groupID);
+                                } catch (const std::invalid_argument& ia) {
+                                    std::cerr << "Invalid port: " << ia.what() << std::endl;
+                                    break;
+                                }
+                            }
+                            else
                             {
-                                std::cout << "Connecting to new server with groupID: " << groupID << " IP: " << ip << " Port: " << port << std::endl;
-                                connectToServer(ip, std::stoi(port), groupID);
+                                server_connections_mutex.unlock();
                             }
                         }
+
                     }
                     serverList.erase(0, pos + delimiter.length());
                 }
             }
             else if (message.find("KEEPALIVE,") != std::string::npos)
             {
-                std::string numberOfMessageStr = message.substr(message.find(",") + 1);
-                int numberOfMessages = std::stoi(numberOfMessageStr);
-                std::cout << "Received KEEPALIVE from server: " << connection.groupID << " with number of messages: " << numberOfMessages << std::endl;
-                incrementMessagesWaiting(messages_waiting, connection.csocket, numberOfMessages);
-            }
-            else if (message.find("FETCH MSGS,") != std::string::npos)
-            {
-                std::string groupID = message.substr(message.find(",") + 1);
                 messages_mutex.lock();
+                std::string numberOfMessageStr = cleanString(message.substr(message.find(",") + 1));
+                try {
+                    int numberOfMessages = std::stoi(numberOfMessageStr);
+                    std::cout << "Received KEEPALIVE from server: " << connection.groupID << " with number of messages: " << numberOfMessages << std::endl;
+                    messages_waiting[connection.csocket] += numberOfMessages;
+
+                    // If there are messages waiting for this server, fetch them
+                    if(numberOfMessages > 0){
+                        sendMessageToServer(connection, "FETCH_MSGS,P3_GROUP_37"); 
+                    }
+                    messages_mutex.unlock();
+                } catch (const std::invalid_argument& ia) {
+                    std::cerr << "Invalid numberOfMessages: " << ia.what() << std::endl;
+                    messages_mutex.unlock();
+                    break;
+                }
+            }
+            else if (message.find("FETCH_MSGS,") != std::string::npos)
+            {
+                std::string groupID = cleanString(message.substr(message.find(",") + 1));
 
                 // Check if there are messages for this group
+                messages_mutex.lock();
                 if(messages_for_groups.find(groupID) != messages_for_groups.end())
                 {
                     for(const auto& messageToGroup : messages_for_groups[groupID])
                     {
                         sendMessageToServer(connection, messageToGroup.content);
+                        std::cout << "Sent message to server. GroupID: " << groupID << " Message: " << messageToGroup.content << std::endl;
                     }
-
-                    // If the server request fetch is the same as the groupID, clear the messages
-                    if (groupID == connection.groupID)
-                    {
-                        messages_for_groups[groupID].clear();
-                        messages_waiting[connection.csocket] = 0;
-                    }
+                    messages_for_groups[groupID].clear();
                 }
+                sendMessageToServer(connection, "No messages for group: " + groupID);
                 messages_mutex.unlock();
             } 
             else if (message.find("SEND MSG,") != std::string::npos)
             {
-                process_SEND_MSG(connection, message);
+                std::string sendmsg = cleanString(message);
+                process_SEND_MSG(connection, sendmsg);
             }
             else if (message.find("STATUSREQ,") != std::string::npos)
             {
-                std::string fromGroupID = message.substr(message.find(",") + 1);
+                std::string fromGroupID = cleanString(message.substr(message.find(",") + 1));
                 std::string status = "STATUSRESP," + this->groupID + "," + fromGroupID;
+
                 messages_mutex.lock();
                 for(const auto& pair : messages_for_groups)
                 {
@@ -359,6 +384,11 @@ public:
                 messages_mutex.unlock();
                 sendMessageToServer(connection, status);
             }
+            else
+            {
+                std::cout << "UNRECOGNIZED message from server " << connection.groupID << ", message: " << message << std::endl;
+
+            }
         }
     }
 
@@ -367,8 +397,6 @@ public:
         const int BUFFER_SIZE = 5000;
         char buffer[BUFFER_SIZE];
         int nread;
-
-        std::cout << "Handling client messages" << std::endl;
 
         while(true)
         {
@@ -405,12 +433,30 @@ public:
                 if(messages_for_groups.find(groupID) != messages_for_groups.end())
                 {
                     sendMessageToClient(connection, messages_for_groups[groupID][0].content);
-
-                    // If the server request fetch is the same as the groupID, clear the messages
+                    messages_for_groups[groupID].erase(messages_for_groups[groupID].begin());
+                    messages_waiting[connection.csocket] -= 1;
+                }
+                else
+                {
                     if (groupID == this->groupID)
                     {
-                        messages_for_groups[groupID].erase(messages_for_groups[groupID].begin());
-                        messages_waiting[connection.csocket] -= 1;
+                        for(const auto& pair : messages_waiting){
+                            // If there is a message for us, fetch it
+                            if(pair.second > 0)
+                            {
+                                for(Connection serverConnection : server_connections)
+                                {
+                                    if(serverConnection.csocket == pair.first)
+                                    {
+                                        sendMessageToServer(serverConnection, "FETCH_MSGS,P3_GROUP_37");
+                                    }
+                                }
+                            }
+                        }                                
+                    }
+                    else
+                    {
+                        sendMessageToClient(connection, "No messages for group: " + groupID);
                     }
                 }
                 messages_mutex.unlock();
@@ -450,8 +496,12 @@ public:
                     {
                         sendMessageToClient(connection, messageToGroup.content);
                     }
+                    messages_mutex.lock();
+                    messages_for_groups[groupID].clear();
+                    messages_waiting[connection.csocket] = 0;
+                    messages_mutex.unlock();
                 }
-                // If the server request fetch is the same as the groupID, clear the messages
+
                 if (groupID == this->groupID)
                 {
                     for(const auto& pair : messages_waiting){
@@ -462,16 +512,12 @@ public:
                             {
                                 if(serverConnection.csocket == pair.first)
                                 {
-                                    sendMessageToServer(serverConnection, "FETCHMSGS,P3_GROUP_37");
+                                    sendMessageToServer(serverConnection, "FETCH_MSGS,P3_GROUP_37");
                                 }
                             }
                         }
                     }                                
                 }
-                // messages_for_groups[groupID].clear();
-                // messages_waiting[connection.csocket] = 0;
-                // messages_mutex.lock();
-                // messages_mutex.unlock();
             }
             else if (message.find("STATUSREQ,") != std::string::npos)
             {
@@ -494,11 +540,21 @@ public:
     // Connect to a server
     void connectToServer(const std::string& targetIP, int targetPort, const std::string& groupID) 
     {
+        int set = 1; // for setsockopt
         int connectionSocket = socket(AF_INET, SOCK_STREAM, 0);
+
         if(connectionSocket < 0)
         {
             perror("Failed to open socket");
             return;
+        }
+
+        // Turn on SO_REUSEADDR to allow socket to be quickly reused after 
+        // program exit.
+        if(setsockopt(connectionSocket, SOL_SOCKET, SO_REUSEADDR, &set, sizeof(set)) < 0)
+        {
+            std::cout << "Failed to set SO_REUSEADDR for port: " << this->port << std::endl;
+            perror("setsockopt failed: ");
         }
 
         struct sockaddr_in server_addr;
@@ -515,7 +571,7 @@ public:
 
         if (connect(connectionSocket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
         {
-            perror("Failed to connect to server");
+            std::cout << "Failed to connect to server, GroupID: " <<  groupID << " IP: " << targetIP << " Port: " << port << std::endl; 
             close(connectionSocket);
             return;
         }
@@ -527,8 +583,7 @@ public:
         server_connections.push_back(newConnection);
         server_connections_mutex.unlock();
 
-        std::cout << "Connected to server " << "IP: " << targetIP << " Port: " << targetPort << std::endl;
-        std::cout << "Checking on messages from server" << std::endl;
+        std::cout << "Connected to server " << groupID << " IP: " << targetIP << " Port: " << targetPort << std::endl;
         
         sendHandshakeMesage(newConnection);
 
@@ -541,19 +596,26 @@ public:
     void sendHandshakeMesage(const Connection& serverConnection)
     {
         sendMessageToServer(serverConnection, "QUERYSERVERS,P3_GROUP_37");
-        std::cout << "Sent handshake message to server, "  << std::endl;
     }
 
     // Send keep alive message to connection
     void sendKeepAlive(const Connection& connection)
     {
         messages_mutex.lock();
+        int count = 0;
         // If connection socket doesn't exist it will create it with value 0
-        int count = messages_waiting[connection.csocket]; 
-        messages_mutex.unlock();
+        for(const auto& pair : messages_for_groups)
+        {
+            if(connection.groupID == pair.first)
+            {
+                count = pair.second.size();
+                break;
+            }
+        }
 
         sendMessageToServer(connection, "KEEPALIVE," + std::to_string(count));
         std::cout << "Sent KEEPALIVE to server: " << connection.groupID << " with number of messages: " << count << std::endl;
+        messages_mutex.unlock();
     }
 
     // Send message to server with STX and ETX
@@ -577,20 +639,38 @@ public:
         }
     }
 
+    // Clean string of STX and ETX
+    std::string cleanString(std::string str)
+    {
+        if (!str.empty() && str[0] == '\002') { // Check for STX
+            str.erase(0, 1);
+        }
+        size_t pos = str.find('\003'); // Check for ETX
+        if (pos != std::string::npos) {
+            str.erase(pos, 1);
+        }
+        return str;
+    }
+
     void process_QUERYSERVERS(const Connection connection)
     {
         // Send list of servers to server
+        server_connections_mutex.lock();
         std::string serverList = "SERVERS,P3_GROUP_37," + ip + "," + std::to_string(port) + ";";
         for (size_t i = 0; i < server_connections.size(); i++)
         {
             serverList += server_connections[i].groupID + "," + server_connections[i].ip + "," + std::to_string(server_connections[i].port) + ";";
-            std::cout << "Server: " << server_connections[i].ip << "," << server_connections[i].port << ";" << std::endl;
         }
-        std::cout << "Sending server list: " << serverList << std::endl;
-        sendMessageToServer(connection, serverList);
-        if (connection.groupID.size() < 6 || connection.groupID.substr(0, 6) != "client") 
+        server_connections_mutex.unlock();
+        std::cout << "Sending server list to " << connection.groupID << std::endl;
+        if (connection.groupID != "client") 
         {
+            sendMessageToServer(connection, serverList);
             sendHandshakeMesage(connection);
+        }
+        else
+        {
+            sendMessageToClient(connection, serverList);
         }
     }
 
@@ -615,8 +695,6 @@ public:
         std::string fromGroupID = message.substr(fromGroupIdPOs + 1, messagePos - fromGroupIdPOs - 1);
         std::string content = message.substr(messagePos + 1);
 
-        std::cout << "Received message for group " << toGroupID << " from " << fromGroupID << ": " << content << std::endl;
-
         if(toGroupID == this->groupID)
         {
             // If the message is for this server, send it to all clients
@@ -633,8 +711,12 @@ public:
             {
                 if(server.groupID == toGroupID)
                 {
-                    sendMessageToServer(server, message);
+                    //sendMessageToServer(server, message);
                     sent = true;
+                    messages_mutex.lock();
+                    messages_for_groups[toGroupID].push_back(Message(fromGroupID, content));
+                    messages_mutex.unlock();
+                    std::cout << "Message stored on server for group: " << server.groupID << std::endl;
                     break;
                 }
             }
@@ -672,7 +754,6 @@ public:
                 {
                     addressBufferResponse = addressBuffer;
                 }
-                std::cout << ifa->ifa_name << ": " << addressBuffer << std::endl;
                 counter++;
             } 
         }
@@ -718,6 +799,22 @@ public:
             }
         }
     }
+
+    // Send handshake every 5 minutes to all servers if max connection is below 10
+    void handshakeTracker()
+    {
+        while(true)
+        {
+            std::this_thread::sleep_for(std::chrono::minutes(1));
+            if(server_connections.size() < MAX_CONNECTED_SERVERS)
+            {
+                for(const auto& connection : server_connections)
+                {
+                    sendHandshakeMesage(connection);
+                }
+            }
+        }
+    }
 };
 
 int main(int argc, char *argv[])
@@ -746,6 +843,10 @@ int main(int argc, char *argv[])
     // Thread to send keep alive messages every minute to all connected servers
     std::thread keep_alive_thread(&Server::keepAliveTracker, &server);
     keep_alive_thread.detach();
+
+    // Thread to send handshake every 5 minutes to all servers if max connection is below 10
+    std::thread handshake_thread(&Server::handshakeTracker, &server);
+    handshake_thread.detach();
 
     // Connect to instructor server to start
     //server.connectToServer("130.208.243.61", 4001, "Instr_1");
