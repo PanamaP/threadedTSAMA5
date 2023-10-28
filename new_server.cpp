@@ -289,7 +289,7 @@ public:
                         }
                         server_connections_mutex.unlock();
                     }
-                    else if(token.find("P3_GROUP_") != std::string::npos || token.find("Instr_") != std::string::npos)
+                    else if(token.find("P3_GROUP_") != std::string::npos || token.find("Instr_") != std::string::npos || token.find("ORACLE") != std::string::npos)
                     {                        
                         std::string groupID = token.substr(0, token.find(","));
                         std::string port = token.substr(token.find(",") + 1);
