@@ -56,7 +56,7 @@ void listenServer(int serverSocket)
        }
        else if(nread > 0)
        {
-            std::cout << getTimestamp() << "]" << " Received: " << buffer << std::endl;
+            std::cout << getTimestamp() << " Received: " << buffer << std::endl;
        }
        printf("\n");
     }
@@ -200,7 +200,7 @@ int main(int argc, char* argv[])
             perror("send() to server failed: ");
             finished = true;
         }
-        std::cout << getTimestamp() << "]" << " Sent: " << cmd << std::endl;
+        std::cout << getTimestamp() << " Sent: " << cmd << std::endl;
         
    }
 }
