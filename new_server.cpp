@@ -5,7 +5,7 @@
 //
 // Command line: ./tsamgroup <port>
 //
-// Author: Elfar Snær Arnarson (elfar21@ru.is)
+// Authors: Elfar Snær Arnarson (elfar21@ru.is), Kristján Þór Matthíasson (kristjanm20@ru.is)
 //
 
 

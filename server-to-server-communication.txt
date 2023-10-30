@@ -1,0 +1,13 @@
+Received messages from other groups:
+
+[27/10/23-19:30:09] Received: Message from P3_GROUP_88. Proof -> image-6.png
+[28/10/23-13:59:17] Received: Message from P3_GROUP_15. Proof -> image-9.png
+[28/10/23-17:38:06] Received: Message from P3_GROUP_6. Proof -> image-11.png
+
+Also received messages a couple of times from ORACLE, proof will be in the images folder
+
+Sent messages to other groups:
+
+[27/10/23-20:10:14] Received: Sent message to server. P3_GROUP_88. Proof -> image-7.png Thats when group 88 fetched the message.
+[28/10/23-14:00:59] Received: Sent message to server. P3_gROUP_15. Proof -> image-9.png
+[28/10/23-17:41:22] Received: Sent message to server. P3_GROUP_6. Proof -> image-11.png

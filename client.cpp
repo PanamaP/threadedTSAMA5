@@ -1,11 +1,16 @@
 //
-// Simple chat client for TSAM-409
+// Simple C&C client for TSAM-409
+// Based on the chat client by Jacky Mallett (jacky@ru.is)
 //
-// Command line: ./chat_client 4000 
+// Command line: ./client <IP of server> <Port>
 //
-// Author: Jacky Mallett (jacky@ru.is)
-// g++ -Wall -std=c++11 client.cpp -o client
+// Example: ./client 127.0.0.1 4002 
 //
+// Compile: g++ -Wall -std=c++11 client.cpp -o client
+//
+// Authors: Elfar Snær Arnarson (elfar21@ru.is), Kristján Þór Matthíasson (kristjanm20@ru.is)
+//
+
 #include <stdio.h>
 #include <errno.h>
 #include <stdlib.h>
