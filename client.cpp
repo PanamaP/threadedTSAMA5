@@ -133,7 +133,6 @@ int main(int argc, char* argv[])
    }
 
     // Send handshake after connection
-    //const char* handshake_msg = "CLIENT_CONNECT";
     const char* handshake_msg = "CLIENT_CONNECT";
     send(serverSocket, handshake_msg, strlen(handshake_msg), 0);
 

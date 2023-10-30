@@ -8,7 +8,6 @@
 // Authors: Elfar Snær Arnarson (elfar21@ru.is), Kristján Þór Matthíasson (kristjanm20@ru.is)
 //
 
-
 #include <iostream>
 #include <string>
 #include <stdio.h>
@@ -31,7 +30,9 @@
 #define ETX '\003'
 #define MAX_CONNECTED_SERVERS 10
 
-
+/*
+* Class for storing messages.
+*/
 class Message {
 public:
     std::string fromGroupID;
@@ -41,6 +42,9 @@ public:
     ~Message() {} // destructor
 };
 
+/*
+* Class for storing connections.
+*/
 class Connection {
 public:
     int csocket;
@@ -48,16 +52,20 @@ public:
     int port;
     std::string groupID;
 
-
+    // For comparing connections
     bool operator==(const Connection& other) const {
         return csocket == other.csocket && ip == other.ip && port == other.port && groupID == other.groupID;
     }
 
     Connection(int csocket, std::string ip, int port, std::string groupID) 
         : csocket(csocket), ip(ip), port(port), groupID(groupID) {}
+    
     ~Connection() {} // destructor
 };
 
+/*
+* Base class for the server.
+*/
 class Server {
 private:
     int sock;               // Socket for connections to server
@@ -66,17 +74,19 @@ private:
     std::string ip;         // IP address of this server
     const int BACKLOG = 10; // Number of server to server connections to queue
 
-    std::vector<Connection> server_connections;
-    std::vector<Connection> client_connections;
-    std::map<int, int> messages_waiting; // sockfd -> number of messages waiting
-    std::map<std::string, std::vector<Message>> messages_for_groups; // groupID -> messages
+    std::vector<Connection> server_connections; // Connected servers
+    std::vector<Connection> client_connections; // Connected clients
+    std::map<int, int> messages_waiting;        // sockfd -> number of messages waiting
+    std::map<std::string, std::vector<Message>> messages_for_groups; // Messages stored for each group, groupID -> messages
 
-    std::mutex server_connections_mutex;
-    std::mutex client_connections_mutex;
-    std::mutex messages_mutex;
+    std::mutex server_connections_mutex; // Mutex for server_connections
+    std::mutex client_connections_mutex; // Mutex for client_connections
+    std::mutex messages_mutex;           // Mutex for messages_for_groups
 
 public:
+    // Constructor
     Server(int port) : port(port) {}
+
     virtual ~Server() {} // destructor
 
     // Initialize the socket
@@ -137,11 +147,12 @@ public:
 
     // Accept connections
     void acceptConnection() {
-        const int BUFFER_SIZE = 5000;
-        char buffer[BUFFER_SIZE];
-        int nread;
-        memset(buffer, 0, sizeof(buffer));
+        const int BUFFER_SIZE = 5000;       // Size of buffer for reading data
+        char buffer[BUFFER_SIZE];           // Buffer for reading data
+        int nread;                          // Number of bytes read
+        memset(buffer, 0, sizeof(buffer));  // Initialize buffer
 
+        // While loop to accept connections
         while(true)
         {
             struct sockaddr_in sk_addr; // address settings of server
@@ -159,10 +170,12 @@ public:
 
             if (message.find("QUERYSERVERS,") != std::string::npos)
             {
-                std::string connectingIP = inet_ntoa(sk_addr.sin_addr);
-                int connectingPort = ntohs(sk_addr.sin_port);
-                std::string groupID = cleanString(message.substr(message.find(",") + 1));
-                Connection newConnection(newsock, connectingIP, connectingPort, groupID);
+                // Create new server connection
+                std::string connectingIP = inet_ntoa(sk_addr.sin_addr);                     // Get connecting IP
+                int connectingPort = ntohs(sk_addr.sin_port);                               // Get connecting port
+                std::string groupID = cleanString(message.substr(message.find(",") + 1));   // Get groupID
+
+                Connection newConnection(newsock, connectingIP, connectingPort, groupID); // Create new connection
                 std::cout << "New server connection accepted" << "IP: " << connectingIP << " Port: " << connectingPort << std::endl;
 
                 // Lock the thread and add new connection
@@ -176,9 +189,10 @@ public:
             }
             else if (message.find("CLIENT_CONNECT") != std::string::npos)
             {
-                std::string connectingIP = inet_ntoa(sk_addr.sin_addr);
-                int connectingPort = ntohs(sk_addr.sin_port);
-                Connection newConnection(newsock, connectingIP, connectingPort, "client");
+                std::string connectingIP = inet_ntoa(sk_addr.sin_addr);                     // Get connecting IP
+                int connectingPort = ntohs(sk_addr.sin_port);                               // Get connecting port
+                Connection newConnection(newsock, connectingIP, connectingPort, "client");  // Create new connection
+
                 std::cout << "New client connection accepted " << "IP: " << connectingIP << " Port: " << connectingPort << " User: " << newConnection.groupID << std::endl;
 
                 // Lock the thread and add new connection
@@ -203,9 +217,9 @@ public:
     // Handle server messages
     void handleServerMessages(Connection connection) 
     {
-        const int BUFFER_SIZE = 5000;
-        char buffer[BUFFER_SIZE];
-        int nread;
+        const int BUFFER_SIZE = 5000;   // Size of buffer for reading data
+        char buffer[BUFFER_SIZE];       // Buffer for reading data
+        int nread;                      // Number of bytes read
 
         while(true)
         {
@@ -219,6 +233,7 @@ public:
                 std::cout << "Server connection closed. " << "IP: " << connection.ip << " Port: " << connection.port << " GroupID: " << connection.groupID << std::endl;
                 server_connections_mutex.lock();
                 
+                // Remove connection from server_connections
                 for (size_t i = 0; i < server_connections.size(); ++i) {
                     if (server_connections[i] == connection) {
                         server_connections.erase(server_connections.begin() + i);
@@ -246,8 +261,8 @@ public:
                 size_t pos = 0;
                 std::string token;
                 while ((pos = serverList.find(delimiter)) != std::string::npos) {
-                    token = cleanString(serverList.substr(0, pos));                    
-                    // This response is the server responding
+                    token = cleanString(serverList.substr(0, pos));        
+
                     if(token.find("SERVERS,") != std::string::npos)
                     {
                         server_connections_mutex.lock();
@@ -263,13 +278,14 @@ public:
                         port = port.substr(port.find(",") + 1);
                         port = port.substr(port.find(",") + 1);
 
-                        // If input is read wrong, skip this server
+                        // If input is read wrong, skip this server. Some servers send extra STX and ETX, this take care of most of them.
                         if(groupID.find("\002") != std::string::npos || groupID.find("\003") != std::string::npos)
                         {
                             server_connections_mutex.unlock();
                             break;
                         }
 
+                        // If the server is already in the list, update it
                         for (size_t i = 0; i < server_connections.size(); ++i) {
                             if (server_connections[i] == connection) {
                                 Connection editConnection = server_connections[i];
@@ -300,6 +316,7 @@ public:
                         std::string ip = token.substr(token.find(",") + 1);
                         ip = ip.substr(0, ip.find(","));
 
+                        // If input is read wrong, skip this erver.
                         if(groupID != this->groupID && port != "-1" && server_connections.size() < MAX_CONNECTED_SERVERS)
                         {
                             server_connections_mutex.lock();
@@ -312,7 +329,6 @@ public:
                             }
                             if(!connected)
                             {   
-                                // std::cout << "Trying to connect to new server: " << groupID << " IP: " << ip << " Port: " << port << std::endl;
                                 try {
                                     int newPort = std::stoi(port);
                                     server_connections_mutex.unlock();
@@ -408,9 +424,9 @@ public:
 
     // Handle client messages
     void handleClientMessages(Connection connection) {
-        const int BUFFER_SIZE = 5000;
-        char buffer[BUFFER_SIZE];
-        int nread;
+        const int BUFFER_SIZE = 5000;   // Size of buffer for reading data
+        char buffer[BUFFER_SIZE];       // Buffer for reading data
+        int nread;                      // Number of bytes read
 
         while(true)
         {
@@ -422,6 +438,7 @@ public:
                 std::cout << "Client connection closed. " << "IP: " << connection.ip << " Port: " << connection.port << std::endl;
                 client_connections_mutex.lock();
                 
+                // Remove connection from client_connections
                 for (size_t i = 0; i < client_connections.size(); ++i) {
                     if (client_connections[i] == connection) {
                         client_connections.erase(client_connections.begin() + i);
@@ -570,13 +587,11 @@ public:
 
         if (inet_pton(AF_INET, targetIP.c_str(), &server_addr.sin_addr) <= 0)
         {
-            //std::cout << "Failed to get address";
             return;
         }
 
         if (connect(connectionSocket, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0)
         {
-            //std::cout << "Failed to connect to server, GroupID: " <<  groupID << " IP: " << targetIP << " Port: " << targetPort << std::endl; 
             close(connectionSocket);
             return;
         }
@@ -689,6 +704,7 @@ public:
         return str;
     }
 
+    // Process the received QUERYSERVERS command
     void process_QUERYSERVERS(const Connection connection)
     {
         // Send list of servers to server
@@ -699,7 +715,7 @@ public:
             serverList += server_connections[i].groupID + "," + server_connections[i].ip + "," + std::to_string(server_connections[i].port) + ";";
         }
         server_connections_mutex.unlock();
-        // std::cout << "Sending server list to " << connection.groupID << std::endl;
+
         if (connection.groupID != "client") 
         {
             sendMessageToServer(connection, serverList);
@@ -743,31 +759,13 @@ public:
         }
         else
         {
-            // If the message is not for this server, send it to the correct server
-            bool sent = false;
-            // for(const auto& server : server_connections)
-            // {
-            //     if(server.groupID == toGroupID)
-            //     {
-            //         //sendMessageToServer(server, message);
-            //         sent = true;
-            //         messages_mutex.lock();
-            //         messages_for_groups[toGroupID].push_back(Message(fromGroupID, content));
-            //         messages_mutex.unlock();
-            //         std::cout << "Message stored on server for group: " << server.groupID << std::endl;
-            //         break;
-            //     }
-            // }
+            // If the message is not for this server, store it
+            messages_mutex.lock();
+            messages_for_groups[toGroupID].push_back(Message(fromGroupID, content));
+            messages_mutex.unlock();
 
-            if(!sent)
-            {
-                messages_mutex.lock();
-                messages_for_groups[toGroupID].push_back(Message(fromGroupID, content));
-                messages_mutex.unlock();
-                std::cout << "Message stored on server for group: " << toGroupID << std::endl;
-                sendMessageToClient(connection,"Message stored on server for group: " + toGroupID);
-                //std::cout << "No server with groupID " << toGroupID << " has been connected. Storing the message." << std::endl;
-            }
+            std::cout << "Message stored on server for group: " << toGroupID << std::endl;
+            sendMessageToClient(connection,"Message stored on server for group: " + toGroupID);
         }
     }
 
@@ -801,30 +799,16 @@ public:
         return addressBufferResponse;
     }
 
+    // Set the IP of this server
     void setServerIP(std::string ip)
     {
         this->ip = ip;
     }
 
+    // Set the groupID of this server
     void setGroupID(std::string groupID)
     {
         this->groupID = groupID;
-    }
-
-    // Increment the number of messages waiting for a socket
-    void incrementMessagesWaiting(std::map<int, int> messages_waiting, const int socket, const int numberOfMessages)
-    {
-        messages_mutex.lock();
-        messages_waiting[socket] += numberOfMessages;
-        messages_mutex.unlock();
-    }
-
-    // Set the number of messages waiting for a socket to a number
-    void setMessagesWaiting(std::map<int, int> messages_waiting, const int socket, const int numberOfMessages)
-    {
-        messages_mutex.lock();
-        messages_waiting[socket] = numberOfMessages;
-        messages_mutex.unlock();
     }
 
     // Send keep alive message every minute to all connected servers
@@ -840,13 +824,14 @@ public:
         }
     }
 
-    // Send handshake every 5 minutes to all servers if max connection is below 10
+    // Send handshake every minute to all servers if max connection is below 10
     void handshakeTracker()
     {
         while(true)
         {
             std::this_thread::sleep_for(std::chrono::minutes(1));
             std::cout << "CONNECTED SERVERS OUT OF MAX: " << server_connections.size() << "/" << MAX_CONNECTED_SERVERS << std::endl;
+
             if(server_connections.size() < MAX_CONNECTED_SERVERS)
             {
                 for(const auto& connection : server_connections)
@@ -854,6 +839,8 @@ public:
                     sendHandshakeMesage(connection);
                 }
             }
+
+            // Hardcode failsafe, if we lose connection to all servers, connect to instructor server
             if(server_connections.size() == 0)
             {
                 connectToServer("130.208.243.61", 4003, "Instr_3");
@@ -864,17 +851,17 @@ public:
 
 int main(int argc, char *argv[])
 {
-
+    // Check for correct number of arguments
     if (argc != 2)
     {
         printf("Usage: ./server <port>\n");
         exit(0);
     }
 
-    int port = atoi(argv[1]);
-    Server server(port);
-    server.setServerIP(server.thisServerIP());
-    server.setGroupID("P3_GROUP_37");
+    int port = atoi(argv[1]);                   // Port number for server
+    Server server(port);               
+    server.setServerIP(server.thisServerIP());  // Set the IP of this server
+    server.setGroupID("P3_GROUP_37");           // Set the groupID of this server
 
     // Setup the server for listening
     server.createSocket();
